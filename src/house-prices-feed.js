@@ -92,6 +92,36 @@
     return date ? Number(date.slice(0, 4)) : null;
   }
 
+  /** The three-letter months, for a readable month label. */
+  const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+    'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+  /**
+   * The month a sale was transferred in, as a label a reader recognises.
+   *
+   * @param {string} date an ISO date
+   * @returns {string|null} e.g. "Jan 2025"
+   */
+  function monthOf(date) {
+    if (!date) return null;
+    const month = Number(date.slice(5, 7));
+    if (!month) return null;
+    return `${MONTH_NAMES[month - 1]} ${date.slice(0, 4)}`;
+  }
+
+  /**
+   * The same month as a sortable number, because "Jan 2025" does not sort and
+   * a chart's categories come out in the order its rows arrive.
+   *
+   * @param {string} date an ISO date
+   * @returns {number|null} e.g. 202501
+   */
+  function monthKeyOf(date) {
+    if (!date) return null;
+    const key = Number(date.slice(0, 4)) * 100 + Number(date.slice(5, 7));
+    return Number.isFinite(key) ? key : null;
+  }
+
   /**
    * Turn one CSV record (an array of the sixteen columns) into a flat row.
    *
@@ -167,6 +197,8 @@
     row.newBuildLabel = row.newBuild === 'Y' ? 'New build' : 'Established';
     row.durationLabel = row.duration === 'L' ? 'Leasehold' : 'Freehold';
     row.year = yearOf(row.date);
+    row.transferMonth = monthOf(row.date);
+    row.transferMonthKey = monthKeyOf(row.date);
     row.address = [row.paon || row.saon, row.street].filter(Boolean).join(' ');
     row.count = 1;
     return row;
@@ -337,6 +369,8 @@
     DURATIONS,
     SNAPSHOT_COLUMNS,
     titleCase,
+    monthOf,
+    monthKeyOf,
     toRow,
     encodeRow,
     decodeRow,

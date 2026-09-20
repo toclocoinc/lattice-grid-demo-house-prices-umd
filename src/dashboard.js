@@ -605,9 +605,23 @@
     host.append(primary);
 
     const barMax = rows && rows.length ? Math.max(1000000, p95Of(rows.map((r) => r.price))) : 2000000;
-    const priceCeiling = rows && rows.length ? percentileOf(rows.map((r) => r.price), 0.99) : 3000000;
-    const priceCeilingNote = `Drawn to ${pounds(priceCeiling)}; the highest one per cent of sales, `
-      + 'which run well beyond it, are above the top of the scale. The table below holds them all.';
+    /*
+     * Where to stop the price charts.
+     *
+     * The 99th percentile left the right-hand half of the histogram empty:
+     * £2,075,000 against a median of £285,000, so the bars that matter were
+     * squeezed into the first third. At the 97.5th -- £1,250,000 -- the last
+     * bucket still holding half a per cent of sales is the sixteenth of
+     * twenty, which puts the readable part of the distribution across four
+     * fifths of the width. Twenty buckets rather than twenty-four, so each bar
+     * is wide enough to read.
+     */
+    const priceCeiling = rows && rows.length ? percentileOf(rows.map((r) => r.price), 0.975) : 1500000;
+    const aboveCeiling = rows && rows.length
+      ? rows.reduce((n, r) => (r.price > priceCeiling ? n + 1 : n), 0) : 0;
+    const priceCeilingNote = `Drawn to ${pounds(priceCeiling)}. `
+      + `${commas(aboveCeiling)} sales above that \u2014 the highest two and a half per cent, `
+      + 'running to hundreds of millions \u2014 are off the top of the scale. The table below holds them all.';
 
     const detailConfig = {
       ...baseGridConfig('Property sales published by HM Land Registry'),
@@ -627,6 +641,60 @@
 
     const detailGrid = createGrid(primary, detailConfig);
     built.detailGrid = detailGrid;
+
+    /*
+     * One row per month of transfer, for the chart below.
+     *
+     * Drawn by year, this release is two tall bars and twenty-eight empty
+     * ones: nearly every sale in a monthly release was transferred in the
+     * last year or two, and the long tail back to 1995 is late registrations,
+     * a handful at a time. By month over the last two years it is a shape a
+     * reader can actually see. The grid keeps every sale either way; this is
+     * a summary of it, and it follows the table's filters.
+     *
+     * It is keyed by the month, because a grouped summary's rows are the
+     * aggregates underneath and carry no `id`, and it is ordered by the month
+     * *number* -- "Jan 2025" does not sort, and a chart takes its categories
+     * in the order its rows arrive.
+     */
+    const MONTHS_SHOWN = 24;
+    const latestMonthKey = rows && rows.length
+      ? rows.reduce((max, r) => (r.transferMonthKey > max ? r.transferMonthKey : max), 0)
+      : 0;
+    const firstMonthKey = latestMonthKey
+      ? (() => {
+        const year = Math.floor(latestMonthKey / 100);
+        const month = latestMonthKey % 100;
+        const back = year * 12 + (month - 1) - (MONTHS_SHOWN - 1);
+        return Math.floor(back / 12) * 100 + (back % 12) + 1;
+      })()
+      : 0;
+    const firstMonthLabel = rows && rows.length
+      ? (rows.find((r) => r.transferMonthKey === firstMonthKey) || {}).transferMonth || ''
+      : '';
+    const olderSales = rows && rows.length
+      ? rows.reduce((n, r) => (r.transferMonthKey < firstMonthKey ? n + 1 : n), 0)
+      : 0;
+
+    const byMonthGrid = createGrid(el('div', 'grid-pane'), {
+      ...baseGridConfig('Sales by month of transfer'),
+      rowKey: 'transferMonth',
+      columns: [
+        { id: 'transferMonth', field: 'transferMonth', title: 'Month', layout: { width: 120 } },
+        { id: 'sales', field: 'sales', title: 'Sales', type: 'number', total: 'sum', layout: { width: 90 } },
+        { id: 'monthKey', field: 'monthKey', title: 'Month key', type: 'number', layout: { width: 100, hidden: true } },
+      ],
+      source: {
+        mode: 'derived',
+        from: detailGrid,
+        follow: 'filtered',
+        where: firstMonthKey ? (row) => row.transferMonthKey >= firstMonthKey : undefined,
+        groupBy: 'transferMonth',
+        select: { sales: { fn: 'count' }, monthKey: { of: 'transferMonthKey', fn: 'min' } },
+        sort: [{ col: 'monthKey', dir: 'asc' }],
+      },
+    });
+    built.byMonthGrid = byMonthGrid;
 
     /* ---------------- the summary tabs ---------------- */
 
@@ -774,7 +842,7 @@
       {
         type: 'histogram',
         y: 'price',
-        buckets: 24,
+        buckets: 20,
         title: 'What prices were paid',
         /*
          * A histogram's buckets span the readings it is given, and no axis
@@ -818,13 +886,20 @@
       },
       {
         type: 'bar',
-        x: 'year',
-        y: 'count',
-        title: 'Sales in this release, by year of transfer',
-        footnote: 'A sale is counted in the month it was registered, not the month it '
-          + 'was agreed, and registration can lag completion by months or years. The tail '
-          + 'back to 1995 is late registrations, not a fall in sales.',
-        axis: { x: { labels: true, rotate: 'auto' }, y: 'Sales' },
+        x: 'transferMonth',
+        y: 'sales',
+        grid: byMonthGrid,
+        title: 'Sales in this release, by month of transfer',
+        footnote: olderSales
+          ? `A sale is counted in the month it was transferred, not the month it was `
+            + `registered, and registration lags completion. Plus ${commas(olderSales)} sales `
+            + `agreed before ${firstMonthLabel}, registered late.`
+          : 'A sale is counted in the month it was transferred, not the month it was '
+            + 'registered, and registration lags completion.',
+        /* Twenty-four months in a box this wide gives each label about
+           sixteen pixels, which truncates them to "Aug 20...". Every third
+           one is labelled instead, so the ones that are drawn can be read. */
+        axis: { x: { labels: true, rotate: 'auto', every: 3 }, y: 'Sales' },
         legend: false,
       },
       {

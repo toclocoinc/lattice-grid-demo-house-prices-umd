@@ -455,6 +455,28 @@ try {
   check(shadowText.bad.length === 0, 'saved copy: the computed columns render numbers, not NaN',
     shadowText.bad.join('; '));
 
+  /*
+   * How many categories each chart plotted, and the month chart in
+   * particular: by year this release was two tall bars and a row of empty
+   * ones, so it is drawn by month over the last two years instead. Fewer than
+   * twenty categories means the month summary has stopped feeding it.
+   */
+  const categories = await evaluate(`(() => window.__housePrices.charts.map((c, i) => {
+    const data = c.data();
+    const series = Array.isArray(data) ? data : (data && data.series) || [];
+    const points = series.length && series[0].points ? series[0].points : [];
+    return { i, points: points.length,
+             first: points.length ? String(points[0].label ?? points[0].xKey ?? '') : null,
+             last: points.length ? String(points[points.length - 1].label ?? '') : null };
+  }))()`);
+  for (const c of categories) {
+    console.log(`  chart ${c.i}: ${c.points} categories, "${c.first}" .. "${c.last}"`);
+  }
+  const months = categories[3];
+  check(months && months.points >= 20,
+    'saved copy: the month chart plots at least twenty months',
+    `${months ? months.points : 0} month(s)`);
+
   noErrors('saved copy');
   await shoot('01-grid-saved');
 
