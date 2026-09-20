@@ -310,7 +310,6 @@
       grandTotalRow: 'bottom',
       groupDefaultExpanded: 0,
       pivot: { groupTotals: 'after' },
-      toolPanel: { side: 'right', panels: ['filters', 'columns', 'formatting'] },
       selection: 'multiple',
       title,
     };
@@ -774,6 +773,10 @@
         x: 'county',
         y: 'price',
         title: 'Value by county',
+        /* A treemap writes each county's name on its own tile, so a legend
+           repeats what the picture already says -- and with a hundred and
+           fifteen counties in it, a legend is all there would be room for. */
+        legend: false,
       },
       {
         type: 'bar',
