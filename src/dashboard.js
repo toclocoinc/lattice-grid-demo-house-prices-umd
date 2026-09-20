@@ -61,12 +61,6 @@
     }).format(value);
   }
 
-  /** A share (0..1) as a percentage with one decimal. */
-  function percent(value) {
-    if (value == null || Number.isNaN(value)) return '';
-    return (value * 100).toFixed(1) + '%';
-  }
-
   /** A clock time, local to whoever is reading. */
   function clockText(ms) {
     return new Date(ms).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
@@ -74,9 +68,24 @@
 
   /** The 95th percentile of a numeric array, for the price data bar's ceiling. */
   function p95Of(values) {
+    return percentileOf(values, 0.95);
+  }
+
+  /**
+   * The value at a quantile of a numeric array.
+   *
+   * The price distribution has a very long tail -- a handful of lot sales and
+   * portfolio transfers run to hundreds of millions against a median of
+   * £285,000 -- so the charts of it need a ceiling that is not the maximum.
+   *
+   * @param {number[]} values the readings
+   * @param {number} q the quantile, 0..1
+   * @returns {number} the value at that quantile
+   */
+  function percentileOf(values, q) {
     if (!values.length) return 0;
     const sorted = [...values].sort((a, b) => a - b);
-    const index = Math.floor((sorted.length - 1) * 0.95);
+    const index = Math.floor((sorted.length - 1) * q);
     return sorted[index] || 0;
   }
 
@@ -91,14 +100,6 @@
     Terraced: 'warning',
     'Flat/maisonette': 'accent',
     Other: 'neutral',
-  };
-
-  const TYPE_TINTS = {
-    Detached: '#e7f4ea',
-    'Semi-detached': '#e7f0fb',
-    Terraced: '#fdf3e3',
-    'Flat/maisonette': '#eee9fb',
-    Other: '#eef1f4',
   };
 
   /**
@@ -243,7 +244,9 @@
             shadow: { kind: 'percentile' },
             title: 'Percentile',
             type: 'number',
-            format: percent,
+            /* The kernel reports a percentile as 0..100 already, so this is a
+               plain number with a percent sign after it, not a ratio. */
+            format: { type: 'number', decimals: 1, suffix: '%' },
             layout: { width: 100 },
           },
           {
@@ -252,7 +255,9 @@
             shadow: { kind: 'shareOfTotal' },
             title: 'Share of value',
             type: 'number',
-            format: percent,
+            /* A share of the total is a ratio between 0 and 1; `style: 'percent'`
+               is what turns it into a percentage. */
+            format: { type: 'number', style: 'percent', decimals: 3 },
             layout: { width: 110 },
           },
         ],
@@ -270,14 +275,15 @@
    * @returns {object} rules keyed by column id
    */
   function formattingRules() {
-    const typeRules = Object.keys(TYPE_TINTS).map((label) => ({
-      id: `type-${label.toLowerCase().replace(/[^a-z0-9]/g, '-')}`,
-      label,
-      when: { op: 'eq', value: label },
-      style: { background: TYPE_TINTS[label] },
-    }));
+    /*
+     * The property type is drawn as a coloured pill, so tinting the cell
+     * behind it said the same thing twice in two different ways -- and the
+     * tint is the weaker of the two, because a wash of colour has to be
+     * learned before it means anything. The pill stays; the rules the reader
+     * can edit are the ones about money, where the value itself carries no
+     * other signal.
+     */
     return {
-      typeLabel: typeRules,
       price: [
         {
           id: 'price-under',
@@ -538,9 +544,9 @@
       el(
         'p',
         'lede',
-        'Every property sale HM Land Registry has published, from the latest monthly release, with the money drawn ' +
-          'live. Group the sales, pivot them, or narrow them by county and type, and the headline figures, the charts ' +
-          'and the summaries all follow.',
+        'Every property sale registered in HM Land Registry\u2019s latest monthly release \u2014 the sales it ' +
+          'recorded that month, which were agreed anything from weeks to years earlier. Group them, pivot them, or ' +
+          'narrow them by county and type, and the headline figures, the charts and the summaries all follow.',
       ),
     );
     if (meta.fellBack) {
@@ -599,6 +605,9 @@
     host.append(primary);
 
     const barMax = rows && rows.length ? Math.max(1000000, p95Of(rows.map((r) => r.price))) : 2000000;
+    const priceCeiling = rows && rows.length ? percentileOf(rows.map((r) => r.price), 0.99) : 3000000;
+    const priceCeilingNote = `Drawn to ${pounds(priceCeiling)}; the highest one per cent of sales, `
+      + 'which run well beyond it, are above the top of the scale. The table below holds them all.';
 
     const detailConfig = {
       ...baseGridConfig('Property sales published by HM Land Registry'),
@@ -752,12 +761,40 @@
     /* ---------------- the charts, bound to the detail grid ---------------- */
 
     const chartSpecs = [
+      /*
+       * Both of these read the price, and the price has a tail that ruins
+       * them: a few hundred lot sales and portfolio transfers between £100m
+       * and £550m against a median of £285,000. Drawn to the full extent,
+       * every ordinary sale lands in the first bucket and every box flattens
+       * onto the axis. The value axis is held at the 99th percentile so the
+       * ninety-nine per cent of sales a reader came to look at fill the
+       * picture, and the note under each says what is above the ceiling.
+       * The table keeps every sale; this is the charts' scale, not a filter.
+       */
       {
         type: 'histogram',
         y: 'price',
         buckets: 24,
         title: 'What prices were paid',
+        /*
+         * A histogram's buckets span the readings it is given, and no axis
+         * setting narrows them -- unlike the box plot below, which takes its
+         * ceiling from `axis.y.max`. So this one is handed the readings it
+         * should bucket instead: the sales at or under the ceiling, taken
+         * from whatever the table is currently showing, so the chart still
+         * follows a filter. Nothing is removed from the table itself.
+         */
+        rows: (g) => {
+          const kept = [];
+          g.rows.forEach((row) => {
+            if (row.group) return;
+            const price = g.rows.value(row.key, 'price');
+            if (typeof price === 'number' && price <= priceCeiling) kept.push(row);
+          });
+          return kept;
+        },
         axis: { x: 'Price', y: 'Sales' },
+        footnote: priceCeilingNote,
         legend: false,
       },
       {
@@ -765,7 +802,8 @@
         x: 'typeLabel',
         y: 'price',
         title: 'Price spread by property type',
-        axis: { x: { labels: true }, y: 'Price' },
+        axis: { x: { labels: true }, y: { title: 'Price', max: priceCeiling } },
+        footnote: priceCeilingNote,
         legend: false,
       },
       {
@@ -782,7 +820,10 @@
         type: 'bar',
         x: 'year',
         y: 'count',
-        title: 'Sales by year',
+        title: 'Sales in this release, by year of transfer',
+        footnote: 'A sale is counted in the month it was registered, not the month it '
+          + 'was agreed, and registration can lag completion by months or years. The tail '
+          + 'back to 1995 is late registrations, not a fall in sales.',
         axis: { x: { labels: true, rotate: 'auto' }, y: 'Sales' },
         legend: false,
       },
