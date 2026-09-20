@@ -45,6 +45,22 @@
     return '£' + Math.round(value).toLocaleString('en-GB');
   }
 
+  /**
+   * A large amount of money, short enough to read in a tile.
+   *
+   * The total of every sale published runs to fifteen characters written out
+   * in full, which is wider than a fifth of the strip; compacted it is six.
+   */
+  function poundsCompact(value) {
+    if (value == null || !Number.isFinite(Number(value))) return '';
+    return new Intl.NumberFormat('en-GB', {
+      style: 'currency',
+      currency: 'GBP',
+      notation: 'compact',
+      maximumFractionDigits: 2,
+    }).format(value);
+  }
+
   /** A share (0..1) as a percentage with one decimal. */
   function percent(value) {
     if (value == null || Number.isNaN(value)) return '';
@@ -588,11 +604,15 @@
     const detailConfig = {
       ...baseGridConfig('Property sales published by HM Land Registry'),
       columns: saleColumns(barMax),
-      /* The same grid can be drawn as a pivot: group the rows down the left
-         gutter and pivot the type across the top, and it becomes a matrix of
-         summed prices and counts. It stays an ordinary table until a pivot
-         dimension is set. */
-      pivotView: true,
+      /* The same grid can be drawn two ways. As built it is a table of the
+         individual sales; the Pivot buttons below switch it to a matrix —
+         the rows grouped down the left gutter, the property type across the
+         top, each cell a summed price — and switch it back again.
+
+         The matrix is a presentation that replaces the table rather than a
+         layer over it, so it is turned on at the moment a pivot dimension is
+         chosen and off again when one is not. Turned on with no dimension to
+         draw there is nothing for the matrix to show. */
     };
     if (source) detailConfig.source = source;
     else detailConfig.rows = rows;
@@ -667,19 +687,35 @@
     addTile('totalValue', {
       title: 'Total value',
       value: { of: 'price', fn: 'sum' },
+      format: (v) => poundsCompact(v),
       bands: overallValue ? { good: overallValue, warn: overallValue * 0.5, direction: 'up' } : undefined,
     });
-    addTile('sales', { title: 'Sales', value: { fn: 'count' } });
+    /* A count has no column to take its formatting from, so it says how it
+       wants to be read: the same thousands separators as the money beside it. */
+    addTile('sales', { title: 'Sales', value: { fn: 'count' }, format: (v) => commas(v) });
+
+    /*
+     * The median and the mean are compared against the same figure over every
+     * sale published. Until something is narrowed, those are the same set of
+     * sales, and a tile comparing a number with itself has nothing to report.
+     * A baseline of null is no comparison at all, and the tile then draws no
+     * change indicator, so the arrow appears once a filter has actually given
+     * it two different things to measure.
+     */
+    const againstAll = (overall) => (overall == null ? undefined : (g) => (
+      g.rows.count() < g.rows.totalCount() ? overall : null
+    ));
+
     addTile('median', {
       title: 'Median price',
       value: { of: 'price', fn: 'median' },
-      baseline: overallMedian != null ? () => overallMedian : undefined,
+      baseline: againstAll(overallMedian),
       interval: (v, g) => g.statistics.interval('price'),
     });
     addTile('mean', {
       title: 'Mean price',
       value: { of: 'price', fn: 'avg' },
-      baseline: overallMean != null ? () => overallMean : undefined,
+      baseline: againstAll(overallMean),
     });
     addTile('p95', { title: 'P95 price', value: { of: 'price', fn: 'p95' } });
 
@@ -783,8 +819,28 @@
       return node;
     };
 
+    /*
+     * The matrix and the table are two presentations of the one grid, and only
+     * one of them draws at a time. `pivotView` is what chooses between them, so
+     * every control that changes the shape of the grid says which it wants:
+     * grouping alone is a tree of sales and stays a table, a pivot dimension is
+     * a matrix, and clearing the pivot returns to the table.
+     */
+    const asTable = () => {
+      detailGrid.columns.pivot([]);
+      detailGrid.set('pivotView', false);
+    };
+
+    const asMatrix = (groupIds, pivotIds) => {
+      detailGrid.set('pivotView', true);
+      detailGrid.columns.group(groupIds);
+      detailGrid.columns.pivot(pivotIds);
+    };
+
     const group = (ids) => () => {
-      if (detailGrid) detailGrid.columns.group(ids);
+      if (!detailGrid) return;
+      asTable();
+      detailGrid.columns.group(ids);
     };
 
     actions.append(el('span', 'actions-label', 'Group by'));
@@ -796,20 +852,14 @@
     actions.append(el('span', 'actions-gap'));
     actions.append(el('span', 'actions-label', 'Pivot'));
     actions.append(
-      button('Type across the year', () => {
-        detailGrid.columns.group(['year']);
-        detailGrid.columns.pivot(['typeLabel']);
-      }),
+      button('Type across the year', () => asMatrix(['year'], ['typeLabel'])),
     );
     actions.append(
-      button('Type across the county', () => {
-        detailGrid.columns.group(['county']);
-        detailGrid.columns.pivot(['typeLabel']);
-      }),
+      button('Type across the county', () => asMatrix(['county'], ['typeLabel'])),
     );
     actions.append(
       button('No pivot', () => {
-        detailGrid.columns.pivot([]);
+        asTable();
         detailGrid.columns.group([]);
       }),
     );
