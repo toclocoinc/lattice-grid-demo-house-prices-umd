@@ -1,0 +1,28 @@
+{
+  "fetchedAt": "2026-09-19T19:23:08.415Z",
+  "fetchedAtMs": 1789845788417,
+  "seconds": 0.8,
+  "rows": 101600,
+  "source": "HM Land Registry Price Paid Data (latest monthly release)",
+  "sourceUrl": "https://www.gov.uk/government/statistical-data-sets/price-paid-data-downloads",
+  "apiUrl": "https://price-paid-data.publicdata.landregistry.gov.uk/pp-monthly-update-new-version.csv",
+  "licence": "Open Government Licence v3.0",
+  "columns": [
+    "id",
+    "price",
+    "date",
+    "postcode",
+    "type",
+    "newBuild",
+    "duration",
+    "paon",
+    "saon",
+    "street",
+    "locality",
+    "town",
+    "district",
+    "county",
+    "category",
+    "status"
+  ]
+}
