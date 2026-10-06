@@ -1077,6 +1077,13 @@
       ),
     );
     footer.append(line);
+
+    const builtWith = el('p', null, 'Built with ');
+    const gridLink = el('a', null, 'Lattice Grid');
+    gridLink.href = 'https://www.latticegrid.dev/statistics/';
+    builtWith.append(gridLink);
+    footer.append(builtWith);
+
     host.append(footer);
 
     built.destroy = () => {
